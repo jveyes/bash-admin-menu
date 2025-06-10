@@ -129,6 +129,7 @@ cleanup_and_exit() {
     fi
     echo ""
     echo -e "\e[0m"
+    log_event "INFO" "session_end" "" "success" "Session ended"
     exit 0
 }
 
@@ -444,19 +445,23 @@ task_ended() {
     echo -e "${color_start}╰─────────────────────────────────────────────╯${color_end}"
 }
 
-# Función para registrar logs
-log_action() {
-    local action="$1"
-    local status="$2"
-    
-    # Solo registrar si el logging está habilitado
-    if [[ "$LOGGING_ENABLED" == "true" ]]; then
-        local logfile="$(dirname "$0")/$LOG_FILE"
-        local timestamp
-        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-        echo "$timestamp | $action | $status" >> "$logfile"
-    fi
+# --- Enhanced Logging Function ---
+log_event() {
+    local level="$1"
+    local action="$2"
+    local plugin="$3"
+    local status="$4"
+    local message="$5"
+    local user
+    user=$(whoami)
+    local logfile="$(dirname "$0")/$LOG_FILE"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%dT%H:%M:%S')
+    echo "$timestamp | user: $user | level: $level | action: $action | plugin: $plugin | status: $status | message: $message" >> "$logfile"
 }
+
+# Log session start
+log_event "INFO" "session_start" "" "success" "Session started"
 
 # Function to show app info
 show_app_info() {
@@ -522,9 +527,19 @@ show_disk() {
   fi
 }
 
+# --- Add Log Menu Options ---
+add_log_menu_options() {
+    menu_options+=("View Log" "Clear Log")
+    menu_plugins+=("__view_log__" "__clear_log__")
+}
+
 # Main loop para menú y submenús
 while true; do
     interrupt_count=0
+    load_menu_section "$current_menu_section"
+    if [[ "$current_menu_section" == "$DEFAULT_SECTION" ]]; then
+        add_log_menu_options
+    fi
     display_menu
     echo -ne "$(msgf PROMPT_SELECT) "
     read -rsn1 first
@@ -540,7 +555,7 @@ while true; do
         continue
     fi
     if [[ "$first" == "q" || "$first" == "Q" ]]; then
-        log_action "$(msgf LOG_USER_EXIT)" "$(msgf LOG_ACTION_EXIT)"
+        log_event "INFO" "exit" "" "success" "User exited via menu"
         cleanup_and_exit
     fi
     if [[ "$first" == $'\e' ]]; then
@@ -570,7 +585,27 @@ while true; do
             plugin_script="${menu_plugins[$idx]}"
             clear
             task_started "${menu_options[$idx]}"
-            log_action "${menu_options[$idx]}" "$(msgf LOG_ACTION_OK)"
+            # --- Logging for menu selection ---
+            if [[ "$plugin_script" == "__view_log__" ]]; then
+                log_event "INFO" "view_log" "" "success" "User viewed the log file"
+                echo -e "\n--- Log File ---\n"
+                if [[ -s "$LOG_FILE" ]]; then
+                    less "$LOG_FILE"
+                else
+                    echo "Log file is empty."
+                    sleep 2
+                fi
+                task_ended "${menu_options[$idx]}"
+                continue
+            elif [[ "$plugin_script" == "__clear_log__" ]]; then
+                log_event "WARNING" "clear_log" "" "success" "User cleared the log file"
+                > "$LOG_FILE"
+                echo "Log file cleared."
+                sleep 1
+                task_ended "${menu_options[$idx]}"
+                continue
+            fi
+            log_event "INFO" "menu_select" "$plugin_script" "started" "User selected menu option: ${menu_options[$idx]}"
             # Normalize plugin_script and BACK_COMMAND to remove hidden characters and comments
             plugin_script=$(echo "$plugin_script" | cut -d'#' -f1 | tr -d '\r\n' | xargs)
             BACK_COMMAND=$(echo "$BACK_COMMAND" | cut -d'#' -f1 | tr -d '\r\n' | xargs)
@@ -601,11 +636,15 @@ while true; do
             if [[ -x "$plugin_script" ]]; then
                 "$plugin_script"
                 if [[ $? -eq 0 && "${menu_plugins[$idx]}" == "$EXIT_COMMAND" ]]; then
+                    log_event "INFO" "exit" "${menu_plugins[$idx]}" "success" "User exited via menu"
                     cleanup_and_exit
+                else
+                    log_event "INFO" "plugin_run" "${menu_plugins[$idx]}" "success" "Plugin executed successfully"
                 fi
             else
                 # Only show plugin not found error if not BACK_COMMAND or SUBMENU
                 if [[ ! "${menu_plugins[$idx]}" =~ ^SUBMENU: ]] && [[ "${menu_plugins[$idx]}" != "$BACK_COMMAND" ]]; then
+                    log_event "ERROR" "plugin_not_found" "${menu_plugins[$idx]}" "failure" "Plugin not found: $plugin_script"
                     local error_color="\e[$(get_color_code "$ERROR_COLOR")m"
                     echo -e "${error_color}$(msgf PLUGIN_NOT_FOUND "$plugin_script")\e[0m"
                 fi
