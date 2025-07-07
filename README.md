@@ -48,7 +48,7 @@ graph TD;
 
 ## ✨ Features
 - 🖱️ **Interactive, paginated menu** with keyboard navigation
-- 🌐 **Multilingual**: English, Spanish, German, French, Chinese, and more
+- 🌐 **Multilingual**: English, Spanish, German, French and more
 - 🔌 **Plugin system**: add new features with simple scripts
 - ⚙️ **Fully configurable** via config files (colors, messages, options)
 - 🎨 **Colorful, visually consistent interface** (Unicode box drawing)
