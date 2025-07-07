@@ -125,11 +125,7 @@ Select an option and press Enter:
 
 ---
 
-## 🎬 Demo (Add your GIF/video here!)
-<!--
-To add a demo, record a GIF (e.g., with Peek or asciinema) and place it in the images/ directory:
-![Demo](images/demo.gif)
--->
+## 🎬 Demo ()
 
 ---
 
