@@ -43,10 +43,37 @@ if [[ -z "$CONFIG_FILE" ]]; then
   CONFIG_FILE="config/menu.en.conf"
 fi
 
-# Fallback to English if the selected config file does not exist
+# 1. Warning for language fallback
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  echo -e "\e[33m[Warning]\e[0m Selected language file '$CONFIG_FILE' not found. Falling back to English."
+  echo -e "\e[33m$(msgf LANG_FALLBACK_WARNING "$CONFIG_FILE")\e[0m"
   CONFIG_FILE="config/menu.en.conf"
+fi
+
+# 2. In log view: replace '--- Log File ---' and 'Log file is empty.'
+if [[ "$plugin_script" == "__view_log__" ]]; then
+  log_event "INFO" "view_log" "" "success" "$(msgf LOG_EVENT_VIEWED)"
+  echo -e "\n$(msgf LOG_VIEW_TITLE)\n"
+  if [[ -s "$LOG_FILE" ]]; then
+    less "$LOG_FILE"
+  else
+    echo "$(msgf LOG_FILE_EMPTY)"
+    sleep 2
+  fi
+  task_ended "${menu_options[$idx]}"
+  continue
+elif [[ "$plugin_script" == "__clear_log__" ]]; then
+  log_event "WARNING" "clear_log" "" "success" "$(msgf LOG_EVENT_CLEARED)"
+  > "$LOG_FILE"
+  echo "$(msgf LOG_FILE_CLEARED)"
+  sleep 1
+  task_ended "${menu_options[$idx]}"
+  continue
+fi
+
+# 3. Unsupported OS error
+if [[ "$OS" == "Unknown" ]]; then
+  echo -e "\e[31m$(msgf UNSUPPORTED_OS "$OS_TYPE")\e[0m"
+  exit 1
 fi
 
 # Read configuration from selected file
@@ -129,7 +156,7 @@ cleanup_and_exit() {
     fi
     echo ""
     echo -e "\e[0m"
-    log_event "INFO" "session_end" "" "success" "Session ended"
+    log_event "INFO" "session_end" "" "success" "$(msgf LOG_EVENT_SESSION_ENDED)"
     exit 0
 }
 
@@ -183,14 +210,28 @@ load_menu_section() {
     done < "$CONFIG_FILE"
 }
 
-# Leer mensajes de usuario desde [MESSAGES]
+# Leer solo las líneas de [EXIT_BOX] correctamente
+EXIT_BOX_LINES=()
 declare -A MSG
 current_section=""
+inside_exit_box=0
 while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%\r}"
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$line" =~ ^\[([A-Z_]+)\] ]]; then
-        current_section="${BASH_REMATCH[1]}"
+    if [[ "$line" =~ ^\[EXIT_BOX\] ]]; then
+        inside_exit_box=1
+        continue
+    fi
+    if [[ "$line" =~ ^\[.*\] ]]; then
+        inside_exit_box=0
+        # Detect and set current_section for other uses
+        if [[ "$line" =~ ^\[([A-Z_]+)\] ]]; then
+            current_section="${BASH_REMATCH[1]}"
+        fi
+        continue
+    fi
+    if (( inside_exit_box )); then
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        EXIT_BOX_LINES+=("$line")
         continue
     fi
     if [[ "$current_section" == "MESSAGES" ]]; then
@@ -198,23 +239,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
             MSG[${BASH_REMATCH[1]}]="${BASH_REMATCH[2]}"
         fi
     fi
-    if [[ "$current_section" == "UI" ]]; then
-        if [[ "$line" =~ ^PAGE_SIZE=([0-9]+) ]]; then
-            PAGE_SIZE="${BASH_REMATCH[1]}"
-        fi
-    fi
-    if [[ "$current_section" == "EXIT_BOX" ]]; then
-        EXIT_BOX_LINES+=("$line")
-    fi
-    if [[ "$current_section" == "MENU_CONFIG" ]]; then
-        if [[ "$line" =~ ^DEFAULT_SECTION=(.*)$ ]]; then
-            DEFAULT_SECTION="${BASH_REMATCH[1]}"
-        elif [[ "$line" =~ ^BACK_COMMAND=(.*)$ ]]; then
-            BACK_COMMAND="${BASH_REMATCH[1]}"
-        elif [[ "$line" =~ ^EXIT_COMMAND=(.*)$ ]]; then
-            EXIT_COMMAND="${BASH_REMATCH[1]}"
-        fi
-    fi
+
 done < "$CONFIG_FILE"
 
 # Función para formatear mensajes con variables
@@ -230,6 +255,13 @@ msgf() {
 
 # Inicial: cargar menú principal
 load_menu_section "$current_menu_section"
+
+# Debug: print config file and INFO_PAGE_OPTIONS value
+>&2 echo "[DEBUG] Using config file: $CONFIG_FILE"
+>&2 echo "[DEBUG] INFO_PAGE_OPTIONS: '$(msgf INFO_PAGE_OPTIONS)'"
+
+# Debug: print all MSG keys and values after loading config
+>&2 echo "[DEBUG] MSG dictionary contents:"; for k in "${!MSG[@]}"; do >&2 echo "[DEBUG] $k = '${MSG[$k]}'"; done
 
 PLUGINS_DIR="$(dirname "$0")/$PLUGIN_DIR"
 
@@ -283,22 +315,26 @@ display_menu() {
   # Determinar el nombre del menú actual para la cabecera
   local menu_title="$(msgf APP_NAME)"
   if [[ "$current_menu_section" =~ ^SUBMENU:(.+)$ ]]; then
-    # Buscar el texto del submenú en el menú principal
     local submenu_key="SUBMENU:${BASH_REMATCH[1]}"
     local submenu_label=""
     while IFS= read -r line || [[ -n "$line" ]]; do
       line="${line%%\r}"
       [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-      if [[ "$line" =~ \|$submenu_key$ ]]; then
-        IFS='|' read -r label _ <<< "$line"
-        submenu_label="$label"
+      # Remove spaces around pipe and compare
+      local clean_line="$(echo "$line" | sed 's/ *| */|/g')"
+      if [[ "$clean_line" =~ \|$submenu_key$ ]]; then
+        IFS='|' read -r label _ <<< "$clean_line"
+        submenu_label="${label//\"/}"
+        submenu_label="$(echo -e "$submenu_label" | sed -e 's/^ *//' -e 's/ *$//')"
         break
       fi
     done < "$CONFIG_FILE"
     if [[ -n "$submenu_label" ]]; then
-      menu_title="$menu_title --> $submenu_label"
+      menu_title="$(msgf APP_NAME)  -->  $submenu_label"
     else
-      menu_title="$menu_title --> ${BASH_REMATCH[1]}"
+      local fallback="${BASH_REMATCH[1]//_/ }"
+      fallback="${fallback^^}"
+      menu_title="$(msgf APP_NAME)  -->  $fallback"
     fi
   fi
   
@@ -310,42 +346,42 @@ display_menu() {
     len=$(display_width "$visible_line")
     (( len > max_length )) && max_length=$len
   done
-  
+
   # Calcular el ancho total considerando el nombre de la app (sin ANSI)
-  local app_name_visible="$(echo -e "$menu_title" | sed -r 's/\\x1B\\[[0-9;]*[a-zA-Z]//g')"
+  local app_name_visible="$(echo -e "$menu_title" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')"
   local app_name_length=$(display_width "$app_name_visible")
-  local menu_width=$((max_length + 2))
-  local content_width=$((app_name_length > menu_width ? app_name_length : menu_width))
-  local total_width=$((content_width + 2))
-  
+  local content_width=$((app_name_length > max_length ? app_name_length : max_length))
+  # Hacer el marco 20% más grande (redondeando hacia arriba)
+  local padded_width=$(( (content_width * 12 + 9) / 10 ))
+
   local title_color="\e[1;$(get_color_code "$TITLE_COLOR")m"
   local menu_color="\e[$(get_color_code "$MENU_COLOR")m"
-  
+
   # Mostrar la caja unificada
-  local border_top="╭$(printf '─%.0s' $(seq 1 $content_width))╮"
-  local border_bot="╰$(printf '─%.0s' $(seq 1 $content_width))╯"
-  
+  local border_top="╭$(printf '─%.0s' $(seq 1 $padded_width))╮"
+  local border_bot="╰$(printf '─%.0s' $(seq 1 $padded_width))╯"
+
   echo -e "${title_color}$border_top\e[0m"
-  
+
   # Línea del nombre de la app (padding solo con longitud visible)
   local app_line=" ${menu_color}$menu_title\e[0m"
-  local app_padding=$((content_width - app_name_length - 1))
+  local app_padding=$((padded_width - app_name_length - 1))
   printf "${title_color}│%b%*s${title_color}│\e[0m\n" "$app_line" "$app_padding" ""
-  
+
   # Línea separadora (exactamente el ancho interior de la caja)
-  local separator_width=$((content_width))
+  local separator_width=$((padded_width))
   local separator="$(printf '─%.0s' $(seq 1 $separator_width))"
   echo -e "${title_color}│${separator}│\e[0m"
-  
+
   # Opciones del menú
   for ((i=start_idx; i<=end_idx; i++)); do
     option=" $((i+1)). ${menu_options[$i]}"
     visible_line=$(echo -e "$option" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
     len=$(display_width "$visible_line")
-    padding=$((content_width - len))
+    padding=$((padded_width - len))
     printf "${title_color}│%s%*s│\e[0m\n" "$option" "$padding" ""
   done
-  
+
   echo -e "${title_color}$border_bot\e[0m"
   
   # Prompt con paginación
@@ -445,7 +481,22 @@ task_ended() {
     echo -e "${color_start}╰─────────────────────────────────────────────╯${color_end}"
 }
 
-# --- Enhanced Logging Function ---
+# --- Log rotation and session ID setup ---
+LOG_ROTATE_SIZE=$((1024*1024)) # 1MB
+SESSION_ID="$(date +%Y%m%d_%H%M%S)_$$"
+
+rotate_log_if_needed() {
+  if [[ -f "$LOG_FILE" ]]; then
+    local size=$(stat -c%s "$LOG_FILE")
+    if (( size > LOG_ROTATE_SIZE )); then
+      local ts=$(date +%Y%m%d_%H%M%S)
+      mv "$LOG_FILE" "${LOG_FILE%.log}_$ts.log"
+      touch "$LOG_FILE"
+    fi
+  fi
+}
+
+# --- Enhanced Logging Function with session ID and rotation ---
 log_event() {
     local level="$1"
     local action="$2"
@@ -457,11 +508,12 @@ log_event() {
     local logfile="$(dirname "$0")/$LOG_FILE"
     local timestamp
     timestamp=$(date '+%Y-%m-%dT%H:%M:%S')
-    echo "$timestamp | user: $user | level: $level | action: $action | plugin: $plugin | status: $status | message: $message" >> "$logfile"
+    rotate_log_if_needed
+    echo "$timestamp | session: $SESSION_ID | user: $user | level: $level | action: $action | plugin: $plugin | status: $status | message: $message" >> "$logfile"
 }
 
 # Log session start
-log_event "INFO" "session_start" "" "success" "Session started"
+log_event "INFO" "session_start" "" "success" "$(msgf LOG_EVENT_SESSION_STARTED)"
 
 # Function to show app info
 show_app_info() {
@@ -495,11 +547,6 @@ case "$OS_TYPE" in
   *)        OS="Unknown";;
 esac
 
-if [[ "$OS" == "Unknown" ]]; then
-  echo -e "\e[31m[Error]\e[0m Unsupported OS: $OS_TYPE. Exiting."
-  exit 1
-fi
-
 # Cross-platform helpers for system info
 show_ip() {
   if [[ "$OS" == "Linux" ]]; then
@@ -529,8 +576,44 @@ show_disk() {
 
 # --- Add Log Menu Options ---
 add_log_menu_options() {
-    menu_options+=("View Log" "Clear Log")
-    menu_plugins+=("__view_log__" "__clear_log__")
+    menu_options+=("Log Tools")
+    menu_plugins+=("SUBMENU:LOGTOOLS")
+}
+
+# Log Tools submenu handler
+log_tools_menu() {
+    while true; do
+        clear
+        echo "==== Log Tools ===="
+        echo "1. Search logs by user"
+        echo "2. Search logs by session"
+        echo "3. Export logs by date"
+        echo "4. View access/config changes"
+        echo "5. Back"
+        read -p "Select an option: " opt
+        case $opt in
+            1)
+                read -p "Enter username: " user
+                grep "user: $user" "$LOG_FILE" || echo "No logs for user $user."
+                read -p "Press Enter to continue...";;
+            2)
+                read -p "Enter session ID: " sid
+                grep "session: $sid" "$LOG_FILE" || echo "No logs for session $sid."
+                read -p "Press Enter to continue...";;
+            3)
+                read -p "Enter date (YYYY-MM-DD): " date
+                grep "$date" "$LOG_FILE" > "log_export_$date.txt"
+                echo "Exported to log_export_$date.txt"
+                read -p "Press Enter to continue...";;
+            4)
+                grep -E "action: session_start|action: config_change|action: language_change" "$LOG_FILE" || echo "No access/config logs."
+                read -p "Press Enter to continue...";;
+            5)
+                break;;
+            *)
+                echo "Invalid option."; sleep 1;;
+        esac
+    done
 }
 
 # Main loop para menú y submenús
@@ -555,7 +638,7 @@ while true; do
         continue
     fi
     if [[ "$first" == "q" || "$first" == "Q" ]]; then
-        log_event "INFO" "exit" "" "success" "User exited via menu"
+        log_event "INFO" "exit" "" "success" "$(msgf LOG_EVENT_EXIT)"
         cleanup_and_exit
     fi
     if [[ "$first" == $'\e' ]]; then
@@ -587,25 +670,29 @@ while true; do
             task_started "${menu_options[$idx]}"
             # --- Logging for menu selection ---
             if [[ "$plugin_script" == "__view_log__" ]]; then
-                log_event "INFO" "view_log" "" "success" "User viewed the log file"
-                echo -e "\n--- Log File ---\n"
+                log_event "INFO" "view_log" "" "success" "$(msgf LOG_EVENT_VIEWED)"
+                echo -e "\n$(msgf LOG_VIEW_TITLE)\n"
                 if [[ -s "$LOG_FILE" ]]; then
                     less "$LOG_FILE"
                 else
-                    echo "Log file is empty."
+                    echo "$(msgf LOG_FILE_EMPTY)"
                     sleep 2
                 fi
                 task_ended "${menu_options[$idx]}"
                 continue
             elif [[ "$plugin_script" == "__clear_log__" ]]; then
-                log_event "WARNING" "clear_log" "" "success" "User cleared the log file"
+                log_event "WARNING" "clear_log" "" "success" "$(msgf LOG_EVENT_CLEARED)"
                 > "$LOG_FILE"
-                echo "Log file cleared."
+                echo "$(msgf LOG_FILE_CLEARED)"
                 sleep 1
                 task_ended "${menu_options[$idx]}"
                 continue
+            elif [[ "$plugin_script" == "SUBMENU:LOGTOOLS" ]]; then
+                log_tools_menu
+                task_ended "${menu_options[$idx]}"
+                continue
             fi
-            log_event "INFO" "menu_select" "$plugin_script" "started" "User selected menu option: ${menu_options[$idx]}"
+            log_event "INFO" "menu_select" "$plugin_script" "started" "$(msgf LOG_EVENT_MENU_SELECT "${menu_options[$idx]}")"
             # Normalize plugin_script and BACK_COMMAND to remove hidden characters and comments
             plugin_script=$(echo "$plugin_script" | cut -d'#' -f1 | tr -d '\r\n' | xargs)
             BACK_COMMAND=$(echo "$BACK_COMMAND" | cut -d'#' -f1 | tr -d '\r\n' | xargs)
@@ -636,15 +723,15 @@ while true; do
             if [[ -x "$plugin_script" ]]; then
                 "$plugin_script"
                 if [[ $? -eq 0 && "${menu_plugins[$idx]}" == "$EXIT_COMMAND" ]]; then
-                    log_event "INFO" "exit" "${menu_plugins[$idx]}" "success" "User exited via menu"
+                    log_event "INFO" "exit" "${menu_plugins[$idx]}" "success" "$(msgf LOG_EVENT_EXIT)"
                     cleanup_and_exit
                 else
-                    log_event "INFO" "plugin_run" "${menu_plugins[$idx]}" "success" "Plugin executed successfully"
+                    log_event "INFO" "plugin_run" "${menu_plugins[$idx]}" "success" "$(msgf LOG_EVENT_PLUGIN_RUN)"
                 fi
             else
                 # Only show plugin not found error if not BACK_COMMAND or SUBMENU
                 if [[ ! "${menu_plugins[$idx]}" =~ ^SUBMENU: ]] && [[ "${menu_plugins[$idx]}" != "$BACK_COMMAND" ]]; then
-                    log_event "ERROR" "plugin_not_found" "${menu_plugins[$idx]}" "failure" "Plugin not found: $plugin_script"
+                    log_event "ERROR" "plugin_not_found" "${menu_plugins[$idx]}" "failure" "$(msgf LOG_EVENT_PLUGIN_NOT_FOUND "$plugin_script")"
                     local error_color="\e[$(get_color_code "$ERROR_COLOR")m"
                     echo -e "${error_color}$(msgf PLUGIN_NOT_FOUND "$plugin_script")\e[0m"
                 fi
