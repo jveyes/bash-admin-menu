@@ -7,12 +7,9 @@ A modern, extensible, **multilingual** Bash-based administrative menu for Linux 
 ---
 
 ## 🌍 Multilingual & Internationalization
-- **Supports multiple languages**: English, Español, Deutsch, Français, 中文 (and easy to add more!)
-- **Unicode/CJK/Emoji ready**: Proper alignment for all scripts and symbols
-- **How to select language:**
-  - Run with `-l config/menu.<lang>.conf` (e.g., `-l config/menu.es.conf` for Spanish)
-  - Defaults to English if the selected language is missing
-- **To add a new language:** Copy an existing config, translate, and use `-l` to select it!
+- **All user-facing messages are now in the `[MESSAGES]` section** of each language config file (English, Español, Deutsch, Français).
+- **Easy to translate:** Copy any config, translate the `[MESSAGES]` section, and use `-l` to select it.
+- **Menu navigation, help, and error messages are fully internationalized.**
 
 ---
 
@@ -129,8 +126,52 @@ Select an option and press Enter:
 
 ---
 
-## 🛠️ Configuration: menu.conf & Multilingual Files
-All menu options, colors, messages, and plugins are configured in `menu.conf` or language-specific configs in `config/`.
+## 🔌 Plugin System & Structure
+- **Plugins follow a clear naming convention:**
+  ```ini
+  [MENU]
+  Hello World | 01_hello_world.sh
+  Echo Example | 02_echo_example.sh
+  ...
+  ```
+- **Logical submenus:**
+  ```ini
+  [MENU]
+  BASICS | SUBMENU:BASICS
+  LOGIC & STRINGS | SUBMENU:LOGIC
+  SYSTEM & FILES | SUBMENU:SYSTEM
+  ```
+- **Submenu example:**
+  ```ini
+  [SUBMENU:BASICS]
+  Hello World | 01_hello_world.sh
+  Echo Example | 02_echo_example.sh
+  ...
+  Back to Main Menu | BACK
+  ```
+- **To add a new plugin:** Place your script in `plugins/`, make it executable, and add it to the appropriate section in your config.
+
+---
+
+## 📂 Submenus & Dynamic Titles
+- **Submenus are grouped logically** (BASICS, LOGIC & STRINGS, SYSTEM & FILES).
+- **Menu header dynamically shows the submenu path** (e.g., `ADMIN MENU  -->  BASICS`).
+- **Non-selectable labels and uppercase titles** for clarity.
+
+---
+
+## 📝 Logging (Advanced)
+- **Automatic log rotation** when `admin_menu.log` exceeds 1MB.
+- **Session and user logging:** Each log entry includes session ID and username.
+- **Log Tools submenu:**
+  - Search logs by user or session
+  - Export logs by date
+  - View access/config changes
+
+---
+
+## 🛠️ Configuration: menu.conf & Multilingual Files (Updated Example)
+All menu options, colors, messages, and plugins are configured in language-specific configs in `config/`.
 
 **Sections:**
 - `[APP]`: App name, version, description, author
@@ -139,122 +180,36 @@ All menu options, colors, messages, and plugins are configured in `menu.conf` or
 - `[PLUGINS]`: Plugin directory
 - `[MENU_CONFIG]`: Main menu logic
 - `[MENU]`: Menu options and their plugin mapping
-- `[MESSAGES]`: All user-facing messages
+- `[MESSAGES]`: All user-facing messages (required for full internationalization)
 
-**Example:**
+**Example `[MESSAGES]` section:**
 ```ini
-[MENU]
-Hello World|hello_world.sh
-Random Number|random_number.sh
-Show Uptime|show_uptime.sh
-List Home|list_home.sh
-Show Calendar|show_calendar.sh
-Show IP|show_ip.sh
-Check Internet|check_internet.sh
-Show Users|show_users.sh
-Show Memory|show_mem.sh
-Fortune|fortune.sh
-Hello from Python|hello_python.py
-Exit|exit.sh
+[MESSAGES]
+APP_NAME=ADMIN MENU
+PROMPT_SELECT=Select an option and press Enter:
+INFO_PAGE_OPTIONS=%s options | Page %s/%s %s | n/→ Next | p/← Prev | q Exit
+ERROR_NO_INPUT=Error: No input provided.
+EXIT_THANKS=Thank you for using %s!
+... (other messages)
 ```
-You can customize colors, logging, and messages in the corresponding sections. To add a new language, copy a config, translate, and use `-l`.
 
 ---
 
-## ▶️ Usage Example: Step-by-Step
-1. **Start the menu:**
-   ```bash
-   bash script.sh
-   ```
-2. **Select language (optional):**
-   ```bash
-   bash script.sh -l config/menu.fr.conf
-   ```
-3. **Navigate with keyboard:** Use numbers, `n`/`p` for next/prev page, `q` to quit.
-4. **Select an option:**
-   - For example, choose "Hello World" to run the hello plugin.
-   - ![Command Example 1](images/command_1.png)
-5. **Interactive input:** Some plugins prompt for input:
-   - ![Command Example 2](images/command_2.png)
-6. **Task feedback:**
-   - ![Task Started](images/task_started.png)
-   - ![Task Ended](images/task_ended.png)
-7. **Exit:** Press `q` or select "Exit".
+## 🧩 Tips & Troubleshooting (Updated)
+- If the navigation bar or help messages do not appear in your language, ensure all messages are inside the `[MESSAGES]` section of your config file.
+- For best Unicode/emoji alignment, use a modern terminal and install Python's `wcwidth` package.
 
 ---
 
-## 🔌 Plugin System: Diverse Examples
-Plugins are simple scripts (Bash, Python, etc.) in the `plugins/` directory. Each menu option is mapped to a plugin script.
-
-**Bash: Hello World**
-```bash
-#!/bin/bash
-echo "Hello, World!"
-date
-```
-**Bash: Show Disk Usage**
-```bash
-#!/bin/bash
-df -h | grep '^/dev/'
-```
-**Bash: Interactive (Ask Name)**
-```bash
-#!/bin/bash
-read -p "Enter your name: " name
-echo "Welcome, $name!"
-```
-**Python: Random Quote**
-```python
-#!/usr/bin/env python3
-import random
-quotes = [
-    "Stay hungry, stay foolish.",
-    "Simplicity is the ultimate sophistication.",
-    "Code is like humor. When you have to explain it, it's bad."
-]
-print(random.choice(quotes))
-```
-**Fun: Fortune (requires `fortune` command)**
-```bash
-#!/bin/bash
-fortune || echo "Install 'fortune' for a random quote!"
-```
-**Fun: Weather (requires `curl`)**
-```bash
-#!/bin/bash
-curl -s wttr.in/?format=3 || echo "Weather info unavailable."
-```
-
-To add a new feature, just drop a script in `plugins/` and add it to `[MENU]` in your config file.
+## 📝 Example: Adding a New Language
+1. Copy an existing config (e.g., `cp config/menu.en.conf config/menu.it.conf`).
+2. Translate the `[MESSAGES]` section and menu items.
+3. Run with `bash script.sh -l config/menu.it.conf`.
 
 ---
 
-## 📂 Submenus & Advanced Menus
-You can create submenus by adding new sections in your config and referencing them in the main menu.
-
-**Example config:**
-```ini
-[MENU]
-Tools|SUBMENU:TOOLS
-Exit|exit.sh
-
-[SUBMENU:TOOLS]
-Show Disk|show_disk.sh
-Show Memory|show_mem.sh
-Back|BACK
-```
-**What it looks like:**
-```
-╭───────────────────────────────╮
-│ ADMIN MENU - Tools            │
-│───────────────────────────────│
-│ 1. Show Disk                  │
-│ 2. Show Memory                │
-│ 3. Back                       │
-╰───────────────────────────────╯
- 3 options (1-3) | q Exit
-Select an option and press Enter:
-```
+## 📝 Example: Log Tools Submenu
+- Access log tools from the main menu to search, export, and audit logs interactively.
 
 ---
 
