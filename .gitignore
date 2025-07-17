@@ -134,3 +134,37 @@ $RECYCLE.BIN/
 # Editor swap/backup files
 *.*~
 *.kate-swp 
+
+# Docker related files and directories
+*.tar
+*.img
+*.qcow2
+*.vmdk
+*.vdi
+*.iso
+*.ova
+*.ovf
+
+# Docker Compose override files
+*docker-compose.override.yml
+*docker-compose.*.yml
+
+# Docker build output
+**/docker-build/
+**/docker-output/
+**/docker-cache/
+
+# Docker config and plugin directories
+config/docker/
+plugins/docker/
+
+# Docker container and image metadata
+**/containers.conf
+**/images.conf
+**/volumes.conf
+
+# Ignore Docker log files
+*.log
+
+# Ignore any other Docker artifacts
+**/docker-* 
